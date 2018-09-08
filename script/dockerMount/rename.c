@@ -4,7 +4,7 @@
 
 #define TIMES 20000
 
-const char* path[2] = {"/root/file1","/root/file2"};
+const char* path[2] = {"/root/dir1/file1","/root/dir2/file2"};
 
 int main(int argc,char* argv[])
 {

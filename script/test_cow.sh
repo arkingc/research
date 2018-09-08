@@ -7,7 +7,6 @@ else
 fi
 
 MOUNT_PATH=`pwd`/dockerMount
-FILE_NAME="file1"
 
 rm iplist
 
@@ -15,18 +14,12 @@ for i in $(seq 1 $NUM)
 do
     ct_name=ct-$i
     
-    docker run -td --name $ct_name -v $MOUNT_PATH:/mnt ubuntu:ssh /bin/bash
+    docker run -td --name $ct_name -v $MOUNT_PATH:/mnt ubuntu:cow512M /bin/bash
     
     docker exec $ct_name /etc/init.d/ssh start
-    
-    docker exec $ct_name mkdir /root/dir1
-    docker exec $ct_name mkdir /root/dir2
-    docker exec $ct_name sh -c "cp /mnt/$FILE_NAME /root/dir1"
     
     declare -i ipidx=$i+1
     echo root@172.17.0.$ipidx >> iplist
 done
-
-sleep 3
 
 pssh -O StrictHostKeyChecking=no -Ph iplist /mnt/a.out
