@@ -5,7 +5,7 @@
 * `iplist`：容器的ip列表
 * `dockerMount`：容器数据卷目录，包含了需要在容器内运行的测试程序
   * `rename.c`：容器内执行大量重命名操作
-    * `file1`：用于重命名的文件
+  * `file1`：用于重命名的文件
   * `cow.c`：容器内执行一个cow操作
   * `time_ms.c`：测试pssh是否能让多少容器同时执行操作
   * `print.c`：打印`“hello world”`，测试pssh是否能成功连接容器
