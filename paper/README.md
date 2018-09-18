@@ -11,7 +11,7 @@
 
 [pdf](http://storageconference.us/2017/Papers/PerformanceAnalysisOfContainerizedApplications.pdf)
 
-> 探究与分析SSD环境下Docker存储驱动与主机文件系统的最佳存储参数的配置
+> 探究与分析本地与远端存储下Docker存储驱动与主机文件系统的最佳存储参数配置
 
 实验负载配置：
 
