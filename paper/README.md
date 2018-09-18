@@ -21,7 +21,7 @@
 
 ### 5.1 Choice of Host FS on Performance
 
-![](img/1.png)
+<div align="center"> <img src="img/1.png"/> </div>
 
 * (a) 测试裸机、主机文件系统为EXT4和XFS时，随机读和随机写的性能（benchmark有32个jobs）
 	* EXT4的随机读性能相对其它2者更低，原因是EXT4默认情况下进行读操作时也会使用互斥锁，因此会有锁竞争。可以使用`dioread nolock`选项强制移除这个锁，性能便会提高，见 (f)
