@@ -1,8 +1,26 @@
-* 读写性能测试分析
-	* [Performance Analysis of Containerized Applications on Local and Remote Storage](#msst17-1)（**`MSST'17`** `SSD` `docker存储驱动` `文件系统`）
+* **可扩展文件系统**
+	* [Physical Disentanglement in a Container-Based File System]()（**`OSDI'14`** `文件系统` `隔离性`）
+* **读写性能测试分析**
+	* [Performance Analysis of Containerized Applications on Local and Remote Storage](#msst17-1)（**`MSST'17`** `SSD` `文件系统` `docker存储驱动`）
 
 <br>
 <br>
+<br>
+
+<h2 id="osdi14-1"></h2>
+
+## Physical Disentanglement in a Container-Based File System
+
+[pdf](http://research.cs.wisc.edu/adsl/Publications/icefs-osdi14.pdf)
+
+> 设计了一个文件系统IceFS，可以将文件和目录分组放入物理隔离的容器(cube)中，不同cube中文件的I/O及数据不会互相影响，从而提高了隔离性：
+>  1. 局部化（错误的影响局部化到具体的cube中；错误恢复局部化到具体的cube中，不同cube中事务的提交并行执行）
+>  2. 特殊化（可以实现一些定制化。因为每个cube是隔离的，那么每个cube可以使用不同的日志模式，相当于在“性能/一致性”方面提供了一个开关，可以根据负载的不同提供不同的设置
+
+"One aspect of current system design has remained devoid of isolation: the physical on-disk structures of file systems"——文件系统的物理磁盘结构不具有隔离性，比如使用全局的bitmap来维护inode和block，一个bitmap的block出问题，会影响所有相关该block相关的文件。总的来说，**逻辑独立的文件系统实体并不是物理独立的**，这会导致不理想的可靠性和性能
+
+在进行事务处理时，IceFS对锁进行了优化
+
 <br>
 
 <h2 id="msst17-1"></h2>
