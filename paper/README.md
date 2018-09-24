@@ -1,5 +1,6 @@
 * **可扩展文件系统**
 	* [Physical Disentanglement in a Container-Based File System](#osdi14-1)（**`OSDI'14`** `文件系统` `隔离性`）
+	* [Understanding Manycore Scalability of File Systems](#atc16-1)（**`ATC'16`** `文件系统`）
 * **读写性能测试分析**
 	* [Performance Analysis of Containerized Applications on Local and Remote Storage](#msst17-1)（**`MSST'17`** `SSD` `文件系统` `docker存储驱动`）
 
@@ -20,6 +21,30 @@
 "One aspect of current system design has remained devoid of isolation: the physical on-disk structures of file systems"——文件系统的物理磁盘结构不具有隔离性，比如使用全局的bitmap来维护inode和block，一个bitmap的block出问题，会影响所有该block相关的文件。总的来说，**逻辑独立的文件系统实体并不是物理独立的**，这会导致不理想的可靠性和性能
 
 在进行事务处理时，IceFS对锁进行了优化。性能上的可扩展性好像也主要是对日志系统的优化
+
+<br>
+
+<h2 id="atc16-1"></h2>
+
+## Understanding Manycore Scalability of File Systems
+
+[pdf](https://www.usenix.org/system/files/conference/atc16/atc16_paper-min.pdf)
+
+> 使用自己开源的benckmark（FxMark）分析5种文件系统的多核扩展性。这5种文件系统（ext4、XFS、btrfs、F2FS、tmpfs）在很多I/O密集型的应用中存在隐藏的可扩展性瓶颈
+
+Introdution部分有提到了当前文件系统的多核可扩展性问题的研究现状（较少），以及研究这个问题的意义
+
+**可扩展性问题**：“For example, all operations on a directory are sequential regardless of read or write; a file cannot be concurrently updated even if there is no overlap in each update. Moreover, we should revisit the core design of file systems for manycore scalability. For example, the consistency mechanisms like journaling (ext4), copy-on-write (btrfs), and log-structured writing (F2FS) are not scalable”
+
+**Exim[8] email server**："The message delivery heavily utilizes I/O operations. It consists of a series of operations ranging from creating, renaming, and deleting small files in the spool directories to appending the message body to the per-user mail file"
+
+<div align="center"> <img src="img/2.png"/> </div>
+
+* (a) 为Exim在6种文件系统下随core增加时的吞吐量。很明显，文件系统限制了Exim应用的多核可扩展性。ext4NJ (i.e., ext4 with no journaling) 相比于ext4有44%的性能下降，原因是在ext4NJ中，2个独立的锁（i.e., a spinlock for journaling and a mutex for directory update）以一种意想不到的方式发生交错。而在ext4中，当调用`create()`创建一个文件时，为了元数据的一致性首先会尝试获取日志的自旋锁，然后获取新建文件所在目录的互斥锁。这种顺序导致了在尝试获取目录互斥锁时，会有较小的竞争，在ext4NJ中，目录互斥锁的大量竞争影响了性能
+* 大多数读写操作都在Page Cache中完成，并且大多数写操作能在后台完成。因此，文件系统的内存结构决定了可扩展性，而跟存储介质无关。因此 (b) 中除了XFS，文件系统在不同存储介质下都表现出相似的性能。XFS的性能与存储介质有很大关系，因为XFS中频繁的元数据更新操作会导致日志数据刷新到磁盘，出现等待
+* **细粒度锁与可扩展性**：(a) 中btrfs完全没有表现出多核扩展性，并且性能很差。一个猜想是为了等待存储事件的完成，引入了大量空闲时间。但是从图 (c) 中看出btrfs有67%的时间花在了内核模式上。事实上，btrfs为了同步root node，有47%的CPU时间花在了同步更新上。而Btrfs在访问B-tree node时，会有大量锁竞争，从而影响了多核扩展性
+
+> 上述实验和结论说明，对于应用开发者和文件系统开发者来说，要预测推断文件系统的可扩展性是很难的。要识别文件系统的可扩展性，需要有一套benchmark（也就是作者开发的FXMARK Benckmark Suite）来不断地评估并指导文件系统系统的设计
 
 <br>
 
