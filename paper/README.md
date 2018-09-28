@@ -46,6 +46,37 @@ Introdution部分有提到了当前文件系统的多核可扩展性问题的研
 
 > 上述实验和结论说明，对于应用开发者和文件系统开发者来说，要预测推断文件系统的可扩展性是很难的。要识别文件系统的可扩展性，需要有一套benchmark（也就是作者开发的FXMARK Benckmark Suite）来不断地评估并指导文件系统系统的设计
 
+### FXMARK Benckmark Suite
+
+#### a）**19 microbenchmarks**
+
+19 microbenchmarks are designed for systematically identifying scalability bottlenecks. **stressing 7 different components of file systems**
+
+* 1）path name resolution
+* 2）page cache for buffered I/O
+* 3）inode management
+* 4）disk block management
+* 5）file offset to disk block mapping
+* 6）directory management
+* 7）consistency guarantee mechanism
+
+
+<div align="center"> <img src="img/3.png"/> </div>
+
+* **microbenchmarks 1-3**
+
+<div align="center"> <img src="img/4.png"/> </div>
+
+图 b）中，当多个进程读一个共享文件中的私有块时，XFS出现扩展性问题。原因是XFS通过共享模式(`down_read()`和`up_read()`)访问文件时，会请求和释放 read/write semaphore。一个 read/write semaphore 内部维护了1个 reader counter ，因此共享模式下每个操作都原子地更新 reader counter
+
+图 c）中，当多个进程读一个共享文件中的共享块时，都出现扩展性问题。因为大量的时间消耗在了page cache的引用计数操作上
+
+#### b）3 well-known I/O-intensive application benchmarks
+
+3 well-known I/O-intensive application benchmarks（Mail server、NoSQL database、File server）to reason about the scalability bottlenecks in I/O-intensive applications
+
+
+
 <br>
 
 <h2 id="msst17-1"></h2>
