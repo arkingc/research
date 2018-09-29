@@ -48,6 +48,8 @@ Introdution部分有提到了当前文件系统的多核可扩展性问题的研
 
 ### FXMARK Benckmark Suite
 
+> 实验环境中，每10个core对应1个套接字（这应该是很多测试在10-core之后表现出扩展性问题的原因）
+
 ### 5. Microbenchmark Analysis
 
 19 microbenchmarks are designed for systematically identifying scalability bottlenecks. **stressing 7 different components of file systems**
@@ -93,6 +95,79 @@ Introdution部分有提到了当前文件系统的多核可扩展性问题的研
 * 在btrfs中，当扩充一个文件时，瓶颈在检查和预留空闲空间；当缩减一个文件时，瓶颈在于更新 extend tree。extend tree 维护了磁盘块的引用计数，引用计数的改变需要更新到根节点的整条路径
 * 在ext4和XFS中，为了减少文件碎片，延迟分配技术会将块分配推迟到writeback。因此，对于ext4和XFS，瓶颈不是块分配，而是日志机制。ext4在操作JBD2共享数据结构上耗费了大量时间，XFS在等待日志buffers刷新上耗费了大量时间
 * 在tmpfs中，检查容量限制是瓶颈。随着已用空间接近容量限制，检查操作采取一条慢路径来精确比较剩余的空间。使用per-CPU计数来跟踪已用空间可以将可扩展性发挥到50-core，当core更多时，无法继续表现扩展性，因为在采取慢路径检查后，会出现自旋锁竞争。当释放空间时，使用原子操作来更新per-cgroup页使用信息成为瓶颈
+
+#### 5.1.4 File Sync Operation
+
+<div align="center"> <img src="img/7.png"/> </div>
+
+当使用`fsync()`时，文件系统同步刷新文件的脏页(dirty pages)和磁盘缓冲(disk caches)
+
+* tmpfs无视`fsync()`操作，能表现出良好的扩展性
+* 图 b) 中，btrfs相比于其它文件系统，`fsync()`的影响更大，因为和[5.1.2](#512-block-overwrite)类似，btrfs会将一个块的更新传播到根节点，因此大量的元数据页会被写。其它的文件系统在10-core之后出现扩展性问题，这是因为在刷新操作中存在锁保护
+
+#### 5.2 Operation on File System Metadata
+
+#### 5.2.1 Path Name Resolution
+
+linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。只有当dcache发生缺失时，内核才会调用底层文件系统来填充dcache。因为文章中的benchmark大部分情况下都是dcache命中，因此很少会调用具体底层文件系统来填充dcache，所以下图测试中不同文件系统的性能差别比较小
+
+<div align="center"> <img src="img/8.png"/> </div>
+
+* 图 b) 中，在偶然会解析相同路径名的情况下，可扩展性能增长到10-core
+* 图 c) 中，解析一个共享的路径名会导致更激烈的竞争
+
+原因是，dentry中存在一个lockref(dentry->d_lockref)，它包含了1个自旋锁和1个引用计数。锁的竞争影响了可扩展性
+
+#### 5.2.2 Directory Read
+
+<div align="center"> <img src="img/9.png"/> </div>
+
+* 图 a) 中，当list私有目录时，除了btrfs，所有文件系统表现出良好的可扩展性。btrfs的瓶颈是细粒度锁。为了读文件系统buffer（例如，extent_buffer）、存储目录项(directory entries)，btrfs会先从包含buffer的叶子节点到根节点来获取读锁；此外，为了获取一个文件系统buffer的读锁，btrfs会执行2个 读/写 自旋锁 操作以及6个原子操作进行引用计数。这样大量的同步操作增加了高速缓存一致性(cache-coherence)的延迟。尽管XFS也使用B+树来组织目录，但是它使用粗粒度的锁，如per-directory锁，因此可扩展性没受影响
+* 图 b) 中，当list共享目录时，所有文件系统都不具有可扩展性。因为VFS会在调用具体文件系统实现的iteration操作(`iterate_dir()`)之前持有一个inode互斥锁
+
+#### 5.2.3 File Creation and Deletion
+
+文件创建和删除的性能对于email servers和file servers来说至关重要。但是从下图可以看出，没有任何一种文件系统在这两种操作上表现出良好的扩展性
+
+<div align="center"> <img src="img/10.png"/> </div>
+
+* 图 a) 和 c) 分别是在私有目录下创建文件、删除私有目录下的文件：
+	* 在tmpfs中，文件创建或删除时会向全局的inode链表（sb->s\_inodes）中添加或删除inode。这个全局inode被一个系统级(system-wide)的自旋锁（如，inode\_sb\_list\_lock）保护，因此自旋锁称为可扩展性的瓶颈
+	* 在ext4中，inode分配是一个per-block group操作，因此最大并发级别是block groups的数量（作者实验环境中是256）。但是ext4预留空间局部性的策略（如，将统一目录下的文件放置到相同的block group中）限制了最大并发度；对于删除操作，ext4首先将被删除的inode添加到super block中的一个孤儿inode链表中，这个链表被一个per-file-system自旋锁保护，链表确保即使删除过程中内核突然崩溃，也能释放inode以及相关资源，因此删除操作的瓶颈在于这个孤儿inode链表
+	* XFS与ext4类似，它也维护inodes per-block group，但是不同于ext4，XFS使用一个B+树来跟踪哪个inode号被分配或释放了。inode的分配和释放会导致B+树被修改，这样的改变需要被logged for consistency。因此，日志机制中等待刷新日志buffers的开销称为主要瓶颈
+	* 在btrfs中，文件已经inode被存储在文件系统B树中。因此，文件创建以及删除会修改文件系统B树，这样的改变最终需要传播到根节点。和其它写操作类似，更新根节点再一次成为瓶颈
+	* 在F2FS中，文件创建和删除出现的性能瓶颈和[5.1.3](#513-file-growing-and-shrinking)类似
+* 图 b) 和 d）分别是在共享目录下创建私有文件、删除共享目录下的私有文件。当在共享目录下执行文件创建和删除操作时，还存在共享目录带来的竞争。就像MRDM一样，在创建和删除文件时，需要持有per-directory互斥锁
+
+#### 5.2.4 File Rename
+
+<div align="center"> <img src="img/11.png"/> </div>
+
+重命名是一个与共享级别无关的system-wide顺序化操作。在VFS中，多个读者通过rename\_lock乐观的访问dcache，同时存在多个写者，之后每个读者检查顺序号是否和操作开始时一样，如果顺序号不匹配（比如，dentries发生了改变），读者简单的重新尝试此操作。因此，一个重命名操作需要去持有一个写锁，这成为了瓶颈
+
+#### 5.3 Scalability in a Direct I/O Mode
+
+直接I/O的性能对很多I/O密集的应用至关重要。为了分析直接I/O的性能，以直接I/O的模式运行[5.1](#51-operation-on-file-data)中的测试
+
+<div align="center"> <img src="img/12.png"/> </div>
+
+* 图 a) 中，每个进程读各自私有文件中的数据。由于没有明显的竞争，因此存储设备成为瓶颈。10-core之后性能逐渐下降是受了NUMA的影响
+* 图 b) 中，读一个共享文件的私有块。XFS相比于其它文件系统，表现出20%~50%的性能提升是因为锁机制不同（没看懂，具体见论文）
+* 图 c) 中，每个进程写各自的私有文件。和读类型，瓶颈是存储设备。btrfs没有表现出可扩展性，主要是因为存在大量的B树操作
+* 图 d) 中，写一个共享文件中各自的私有块时，只有XFS的可扩展性能表现到10-core。其它文件系统在执行对同一文件写时，需要持有inode互斥锁，而XFS在写磁盘块时持有共享锁，对共享文件不同块的写操作可以并发执行
+
+对共享文件进行访问的可扩展性瓶颈是数据库系统、虚拟机应用的严重限制。在这些应用中，会开启多线程、以直接I/O的模式来访问大文件
+
+#### 5.4 Impact of Storage Medium
+
+> performance at 80-core
+
+<div align="center"> <img src="img/13.png"/> </div>
+
+* 对于同步写操作（如，DWSL）或者那些导致频繁的缺页错误(page cache misses)的操作（如，DWAL）。存储介质的带宽是一个影响性能的显著因素
+* 对于buffered reads（如，DRBL）或竞争操作（如，DWOM），存储介质对性能的影响十分微不足道
+
+> 随着更大内存设备、更快存储介质（如，NVMe）以及增长的cores的使用，理解，测量，并提高文件系统的可扩展性表现十分重要
 
 ### 6. Application Benchmarks Analysis
 
