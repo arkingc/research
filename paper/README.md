@@ -48,7 +48,7 @@ Introdution部分有提到了当前文件系统的多核可扩展性问题的研
 
 ### FXMARK Benckmark Suite
 
-#### a）**19 microbenchmarks**
+### 5. Microbenchmark Analysis
 
 19 microbenchmarks are designed for systematically identifying scalability bottlenecks. **stressing 7 different components of file systems**
 
@@ -63,7 +63,9 @@ Introdution部分有提到了当前文件系统的多核可扩展性问题的研
 
 <div align="center"> <img src="img/3.png"/> </div>
 
-* **microbenchmarks 1-3**
+#### 5.1 Operation on File Data
+
+#### 5.1.1 Operation on File Data Block Read
 
 <div align="center"> <img src="img/4.png"/> </div>
 
@@ -71,7 +73,28 @@ Introdution部分有提到了当前文件系统的多核可扩展性问题的研
 
 图 c）中，当多个进程读一个共享文件中的共享块时，都出现扩展性问题。因为大量的时间消耗在了page cache的引用计数操作上
 
-#### b）3 well-known I/O-intensive application benchmarks
+#### 5.1.2 Block Overwrite
+
+<div align="center"> <img src="img/5.png"/> </div>
+
+图 a) 中，当多个进程写各自私有文件中的一个块时，仅有数据块和inode的属性会被更新，因此按理应该表现出良好的扩展性。但是btrfs、ext4、F2FS没有表现出良好扩展性
+
+* 对于ext4来说，这是因为日志事务的处理过程中存在锁竞争。不同于ext4，XFS使用了 delayed logging，它可以最小化日志写
+* 而F2FS的写操作最终会触发 segment cleaning(or garbage collection) 来回收无效的块。segment cleaning 会占用一个文件系统范围的 read/write semaphore ，从而冻结其它文件系统操作
+* btrfs使用了cow，因此写操作会分配新块，因此磁盘块的分配（比如，更新extent tree）变成了顺序化瓶颈
+
+图 b) 中，当多个进程写一个共享文件的私有块时，没有哪个文件系统能表现出扩展性。这种情况下，瓶颈是inode互斥锁(inode->i_mutex)。这种顺序化瓶颈源于特定文件系统的实现，而不是VFS。因为测试的这几个文件系统都没有实现一种“范围”锁，这种锁在并发式文件系统[81]中是十分常见的，由于没有“范围”锁，因此只能使用一个粒度更大的文件级别的锁，即inode互斥锁。这个问题对于可扩展I/O密集型应用如DBMS来说，是一个严重的限制
+
+#### 5.1.3 File Growing and Shrinking
+
+<div align="center"> <img src="img/6.png"/> </div>
+
+* 在F2FS中，分配或释放磁盘块会引起2个数据结构的更新：SIT(段信息表，用于跟踪block的可用性)和NAT(节点地址表，用于跟踪inode和block的映射表)。这两个数据结构的更新产生了竞争，因此限制了扩展性
+* 在btrfs中，当扩充一个文件时，瓶颈在检查和预留空闲空间；当缩减一个文件时，瓶颈在于更新 extend tree。extend tree 维护了磁盘块的引用计数，引用计数的改变需要更新到根节点的整条路径
+* 在ext4和XFS中，为了减少文件碎片，延迟分配技术会将块分配推迟到writeback。因此，对于ext4和XFS，瓶颈不是块分配，而是日志机制。ext4在操作JBD2共享数据结构上耗费了大量时间，XFS在等待日志buffers刷新上耗费了大量时间
+* 在tmpfs中，检查容量限制是瓶颈。随着已用空间接近容量限制，检查操作采取一条慢路径来精确比较剩余的空间。使用per-CPU计数来跟踪已用空间可以将可扩展性发挥到50-core，当core更多时，无法继续表现扩展性，因为在采取慢路径检查后，会出现自旋锁竞争。当释放空间时，使用原子操作来更新per-cgroup页使用信息成为瓶颈
+
+### 6. Application Benchmarks Analysis
 
 3 well-known I/O-intensive application benchmarks（Mail server、NoSQL database、File server）to reason about the scalability bottlenecks in I/O-intensive applications
 
