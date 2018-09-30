@@ -173,7 +173,32 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 
 3 well-known I/O-intensive application benchmarks（Mail server、NoSQL database、File server）to reason about the scalability bottlenecks in I/O-intensive applications
 
+<div align="center"> <img src="img/14.png"/> </div>
 
+* 图 a) ，在移除掉Exim中的可扩展性瓶颈后，性能相比于最开始的测试有明显提升。tmpfs能成功扩展到80-core，除此之外，ext4扩展性最好，然后是ext4NJ，但是他们仍然比tmpfs差，原因是“Exim creates and deletes small files in partitioned spool directories, performance bottlenecks in each file system are equivalent to both MWCL and MWUL(see §5.2.3)”
+* 图 b) ，10-core后所有文件系统都无法表现出扩展性。“The main bottleneck can be found in RocksDB itself, synchronizing compactor threads among each other. Since multiple compactor threads concurrently write new merged files to disk, the behavior and performance bottleneck in each file system is analogous to DWAL (see §5.1.2)”
+* 图 c) ，任何文件系统都无法表现出扩展性。因为DBENCH在一个共享目录下读、写、删除大量的文件，因此瓶颈类似于MWCM and MWUM (§5.2.3)。“tmpfs suffers for two reasons: look-ups and insertions in the page cache and reference counting for the dentry of the directory”
+
+### 7. Summary of Benchmarks
+
+下图总结了每种文件系统中的瓶颈
+
+<div align="center"> <img src="img/15.png"/> </div>
+
+下图展示了19种microbenchmarks在80-core下，相对于1-core时的性能提升：
+
+<div align="center"> <img src="img/16.png"/> </div>
+
+作者认为，I/O密集型应用的开发者应该注意以下几点发现：
+
+* **高局部性可能引发性能低谷**：cache hits（§5.1.1, §5.2.1）
+* **重命名是系统级的顺序化**：`rename()` is commonly used in many applications for transactional updates [46, 71, 75]（§5.2.4）
+* **即使是同一目录的读操作也是顺序化的**：per-directory mutex(inode->i_mutex)（§5.2.2, §5.2.3, §5.2.4）
+* **一个文件不能被同时更新**
+* **修改元数据不具有扩展性**：ext4和XFS中的日志机制、btrfs中的cow、F2FS中的log-structured writing
+* **overwriting可能和appending开销一样大**：在btrfs和F2FS中，overwrite在一块新的空间写，会引发磁盘块的释放和分配、更新inode block map，因此，和append的开销一样
+* **scalability is not portable**
+* **不可扩展通常意味着消耗CPU循环周期**
 
 <br>
 
