@@ -219,7 +219,7 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 
 ### 9. Related Work
 
-The Linux kernel community has made a steady effort to improve the scalability of the file system by mostly reducing lock contentions [35, 36, 65]
+“The Linux kernel community has made a steady effort to improve the scalability of the file system by mostly reducing lock contentions [[35](https://lwn.net/Articles/360199/), [36](https://lwn.net/Articles/419811/), [65](https://lkml.org/lkml/2013/9/4/471)]”
 
 <br>
 
