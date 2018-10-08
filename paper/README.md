@@ -65,6 +65,7 @@ Introdution部分有提到了当前文件系统的多核可扩展性问题的研
 	* [5.4 Impact of Storage Medium](#54-impact-of-storage-medium)
 * [6. Application Benchmarks Analysis](#6-application-benchmarks-analysis)
 * [7. Summary of Benchmarks](#7-summary-of-benchmarks)
+* [9. Related Work](#9-related-work)
 
 ### 5. Microbenchmark Analysis
 
@@ -215,6 +216,10 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 * **overwriting可能和appending开销一样大**：在btrfs和F2FS中，overwrite在一块新的空间写，会引发磁盘块的释放和分配、更新inode block map，因此，和append的开销一样
 * **scalability is not portable**
 * **不可扩展通常意味着消耗CPU循环周期**
+
+### 9. Related Work
+
+The Linux kernel community has made a steady effort to improve the scalability of the file system by mostly reducing lock contentions [35, 36, 65]
 
 <br>
 
