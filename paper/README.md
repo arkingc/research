@@ -1,8 +1,10 @@
 * **可扩展文件系统**
 	* [Physical Disentanglement in a Container-Based File System](#osdi14-1)（**`OSDI'14`** `文件系统` `隔离性`）
 	* [Understanding Manycore Scalability of File Systems](#atc16-1)（**`ATC'16`** `文件系统`）
-* **读写性能测试分析**
-	* [Performance Analysis of Containerized Applications on Local and Remote Storage](#msst17-1)（**`MSST'17`** `SSD` `文件系统` `docker存储驱动`）
+* **Dokcer读写测试**
+	* [Performance Analysis of Containerized Applications on Local and Remote Storage](#msst17-1)（**`MSST'17`** `SSD` `文件系统`）
+	* [In Search of the Ideal Storage Configuration for Docker Containers](#fasw17-1)（**`FAS*W'17`**）
+	* [Performance Analysis of Union and CoW File Systems with Docker](#ispass17-1)（**`CAST'16`**）
 
 <br>
 <br>
@@ -133,7 +135,7 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 * 图 b) 中，在偶然会解析相同路径名的情况下，可扩展性能增长到10-core
 * 图 c) 中，解析一个共享的路径名会导致更激烈的竞争
 
-原因是，dentry中存在一个lockref(dentry->d_lockref)，它包含了1个自旋锁和1个引用计数。锁的竞争影响了可扩展性
+原因是，dentry中存在一个[lockref](http://www.lenky.info/archives/2013/10/2358)(dentry->d_lockref)，它包含了1个自旋锁和1个引用计数。锁的竞争影响了可扩展性
 
 #### 5.2.2 Directory Read
 
@@ -149,10 +151,10 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 <div align="center"> <img src="img/10.png"/> </div>
 
 * 图 a) 和 c) 分别是在私有目录下创建文件、删除私有目录下的文件：
-	* 在tmpfs中，文件创建或删除时会向全局的inode链表（sb->s\_inodes）中添加或删除inode。这个全局inode被一个系统级(system-wide)的自旋锁（如，inode\_sb\_list\_lock）保护，因此自旋锁称为可扩展性的瓶颈
-	* 在ext4中，inode分配是一个per-block group操作，因此最大并发级别是block groups的数量（作者实验环境中是256）。但是ext4预留空间局部性的策略（如，将统一目录下的文件放置到相同的block group中）限制了最大并发度；对于删除操作，ext4首先将被删除的inode添加到super block中的一个孤儿inode链表中，这个链表被一个per-file-system自旋锁保护，链表确保即使删除过程中内核突然崩溃，也能释放inode以及相关资源，因此删除操作的瓶颈在于这个孤儿inode链表
-	* XFS与ext4类似，它也维护inodes per-block group，但是不同于ext4，XFS使用一个B+树来跟踪哪个inode号被分配或释放了。inode的分配和释放会导致B+树被修改，这样的改变需要被logged for consistency。因此，日志机制中等待刷新日志buffers的开销称为主要瓶颈
-	* 在btrfs中，文件已经inode被存储在文件系统B树中。因此，文件创建以及删除会修改文件系统B树，这样的改变最终需要传播到根节点。和其它写操作类似，更新根节点再一次成为瓶颈
+	* 在tmpfs中，文件创建或删除时会向超级块的inode链表（sb->s\_inodes）中添加或删除inode。一个超级块中的inode链表被一个系统级(system-wide, not file system-wide)的自旋锁（如，inode\_sb\_list\_lock，[这个后来换成了file system-wide级的自旋锁](https://patchwork.kernel.org/patch/6665491/)）保护，因此自旋锁成为可扩展性的瓶颈
+	* 在ext4中，inode分配是一个per-block group操作，因此最大并发级别是block groups的数量（作者实验环境中是256）。但是ext4预留空间局部性的策略（如，将同一目录下的文件放置到相同的block group中）限制了最大并发度；对于删除操作，ext4首先将被删除的inode添加到super block中的一个孤儿inode链表中，这个链表被一个per-file-system自旋锁保护，链表确保即使删除过程中内核突然崩溃，也能释放inode以及相关资源，因此删除操作的瓶颈在于这个孤儿inode链表
+	* XFS与ext4类似，它也维护inodes per-block group，但是不同于ext4，XFS使用一个B+树来跟踪哪个inode号被分配或释放了。inode的分配和释放会导致B+树被修改，这样的改变需要被logged for consistency。因此，日志机制中等待刷新日志buffers的开销成为主要瓶颈
+	* 在btrfs中，文件以及inode被存储在文件系统B树中。因此，文件创建以及删除会修改文件系统B树，这样的改变最终需要传播到根节点。和其它写操作类似，更新根节点再一次成为瓶颈
 	* 在F2FS中，文件创建和删除出现的性能瓶颈和[5.1.3](#513-file-growing-and-shrinking)类似
 * 图 b) 和 d）分别是在共享目录下创建私有文件、删除共享目录下的私有文件。当在共享目录下执行文件创建和删除操作时，还存在共享目录带来的竞争。就像MRDM一样，在创建和删除文件时，需要持有per-directory互斥锁
 
@@ -248,3 +250,43 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 > paper中还测了顺序读写的性能对比，EXT4和XFS与裸机的性能对比不大，所以区别主要在于随机读写。基于上面的实验结果，可以根据应用是随机读敏感还是随机写敏感在2种主机文件系统中进行选择。后续的实验选择的主机文件系统都是XFS（除了使用btrfs存储驱动时）
 
 <br>
+
+<h2 id="fasw17-1"></h2>
+
+## In Search of the Ideal Storage Configuration for Docker Containers
+
+[pdf](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8064124&tag=1)
+
+“storage management for Docker containers has remained largely unexplored with a dizzying array of solution choices and configuration options”
+
+> 介绍并总结了docker的多种存储驱动的优劣；并对aufs、overlay/overlay2、btrfs、device-mapper性能进行了测试
+
+* aufs和overlay2比较适用于读密集型的负载中
+* btrfs比较适用于部署环境等负载多变的环境中
+* device-mapper具有稳定的codebase，但是性能差，并且受底层存储的影响大
+
+### 存储驱动介绍
+
+* **VFS**：并不是通过cow来实现容器和镜像的存储分离，而是在启动一个容器时创建一个完整的镜像拷贝。因此能运行于任何文件系统之上，非常稳定。但是因此效率很差、不推荐生产环境中使用。
+* **aufs**：aufs的性能依赖于很多因素——应用的访问形式、文件的数量、文件在各层的分布以及文件大小
+* **overlay/overlay2**：都依赖与相同的底层文件系统——OverlayFS（另一种联合文件系统的实现）相比于aufs，OverlayFS并入了内核主线（这篇文章没有评估overlay）
+* **device-mapper**：操作在块设备级而不是文件系统级。驱动利用linux的device-mapper子系统来创建thin-provisioned块设备。首先创建一个pool，这个pool位于位于2个物理块设备（一个用于用户数据，一个用于device-mapper元数据）之上。当创建一个容器时，会从pool中分配一个volume（dm通常创建一个volume作为前一个创建的volume的可写快照）。最后，dm使用一个可配置的文件系统来格式化volume。dm使用块级的cow（默认情况512KB），但是另一方面，在快照创建过程中不能使用任何文件系统的信息
+* **btrfs**：btrfs是一个基于cow友好的B-tree实现的现代文件系统。因为天生支持cow，所以相比于aufs和overlay，btrfs不需要底层文件系统支持...btrfs也是块级的cow
+
+"All this makes choosing the appropriate driver difficult as it depends on the workload and the environment in which it is deployed"
+
+
+
+<br>
+
+<h2 id="cast16-1"></h2>
+
+## Performance Analysis of Union and CoW File Systems with Docker
+
+[pdf](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7915029)
+
+> 对联合文件系统、cow文件系统进行性能分析比较
+> * 测试不同存储驱动下`commit`、`build`、`rm`、`rmi`等指令的性能（4.4，4.5）
+> * 使用fio作为micro-benchmark测试了随机写的性能（4.6.1）
+> * 使用filebench作为macro-benchmark测试了web server的性能（4.6.2）
+
