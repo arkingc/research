@@ -302,4 +302,4 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 
 > 块级cow节省了磁盘空间，但是在内存会有多份冗余拷贝，而内存空间小，价钱昂贵、加上不同进程读磁盘中的相同块时，由于在内存中不能共享块，因此会有多余的I/O，有必要进行优化。文章基于btrfs，实现了一种节约内存的cow机制——Totalcow
 
-类型工作：**[Improving Copy-on-Write Performance in Container Storage Drivers](https://www.snia.org/sites/default/files/SDC/2016/presentations/capacity_optimization/FrankZaho_Improving_COW_Performance_ContainerStorage_Drivers-Final-2.pdf)**
+类似工作：**[Improving Copy-on-Write Performance in Container Storage Drivers](https://www.snia.org/sites/default/files/SDC/2016/presentations/capacity_optimization/FrankZaho_Improving_COW_Performance_ContainerStorage_Drivers-Final-2.pdf)**
