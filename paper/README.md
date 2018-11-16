@@ -5,6 +5,8 @@
 	* [Performance Analysis of Containerized Applications on Local and Remote Storage](#msst17-1)（**`MSST'17`** `SSD` `文件系统`）
 	* [In Search of the Ideal Storage Configuration for Docker Containers](#fasw17-1)（**`FAS*W'17`**）
 	* [Performance Analysis of Union and CoW File Systems with Docker](#cast16-1)（**`CAST'16`**）
+* **Docker存储驱动优化**
+	* [TotalCOW: Unleash the Power of Copy-On-Write for Thin-provisioned Containers](#apsys15-1)（**`APSys'15`**）
 
 <br>
 <br>
@@ -290,3 +292,14 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 > * 使用fio作为micro-benchmark测试了随机写的性能（4.6.1）
 > * 使用filebench作为macro-benchmark测试了web server的性能（4.6.2）
 
+<br>
+
+<h2 id="apsys15-1"></h2>
+
+## TotalCOW: Unleash the Power of Copy-On-Write for Thin-provisioned Containers
+
+[pdf](http://ranger.uta.edu/~sjiang/pubs/papers/wu15-totalcow.pdf)
+
+> 块级cow节省了磁盘空间，但是在内存会有多份冗余拷贝，而内存空间小，价钱昂贵、加上不同进程读磁盘中的相同块时，由于在内存中不能共享块，因此会有多余的I/O，因此有必要进行优化。文章基于btrfs，实现了一种节约内存的cow机制——Totalcow
+
+类型工作：**[Improving Copy-on-Write Performance in Container Storage Drivers](https://www.snia.org/sites/default/files/SDC/2016/presentations/capacity_optimization/FrankZaho_Improving_COW_Performance_ContainerStorage_Drivers-Final-2.pdf)**
