@@ -1,5 +1,8 @@
 * **可扩展文件系统**
-	* [Physical Disentanglement in a Container-Based File System](#osdi14-1)（**`OSDI'14`** `文件系统` `隔离性`）
+	* [Physical Disentanglement in a Container-Based File System](#osdi14-1)（**`OSDI'14`** `文件系统`）
+	* [A Scalable Architecture for Incremental Parallelization of File System Code](#osdi16-1)（`OSDI'16` `文件系统`）
+	* [High-Performance Transaction Processing in Journaling File Systems](#fast18-1)（**`FAST'18`** `文件系统`）
+	* [SpanFS: A Scalable File System on Fast Storage Devices](#atc15-1)（**`ATC'15` `文件系统`**）
 	* [Understanding Manycore Scalability of File Systems](#atc16-1)（**`ATC'16`** `文件系统`）
 * **Dokcer读写测试**
 	* [Performance Analysis of Containerized Applications on Local and Remote Storage](#msst17-1)（**`MSST'17`** `SSD` `文件系统`）
@@ -303,3 +306,85 @@ linux内核维护了一个目录cache，称为dcache（缓存dentry结构）。�
 > 块级cow节省了磁盘空间，但是在内存会有多份冗余拷贝，而内存空间小，价钱昂贵、加上不同进程读磁盘中的相同块时，由于在内存中不能共享块，因此会有多余的I/O，有必要进行优化。文章基于btrfs，实现了一种节约内存的cow机制——Totalcow
 
 类似工作：**[Improving Copy-on-Write Performance in Container Storage Drivers](https://www.snia.org/sites/default/files/SDC/2016/presentations/capacity_optimization/FrankZaho_Improving_COW_Performance_ContainerStorage_Drivers-Final-2.pdf)**
+
+<br>
+
+<h2 id="atc15-1"></h2>
+
+## SpanFS: A Scalable File System on Fast Storage Devices
+
+[pdf](https://www.usenix.org/system/files/conference/atc15/atc15-paper-kang.pdf)
+
+> 基于Ext4扩展的一个多核可扩展文件系统，SpanFS将中心化的文件系统服务换成一组相互独立的micro文件系统服务，称为domains。每个domain独立地执行各自的文件系统服务，如数据分配、日志，因此当并发访问不同的domain时，不会产生竞争
+
+<br>
+
+<h2 id="fast18-1"></h2>
+
+## High-Performance Transaction Processing in Journaling File Systems
+
+[pdf](https://www.usenix.org/system/files/conference/fast18/fast18-son.pdf)
+
+> 解决JBD2日志文件系统中的锁竞争，提高日志处理操作的可扩展性
+
+[日志文件系统](https://www.ibm.com/developerworks/cn/linux/l-journaling-filesystems/index.html)
+
+日志文件系统是使用日志来缓冲文件系统的修改。可以根据记录的时间与内容采取不同的**策略**：
+
+1. **回写（writeback）**：仅有元数据被记录到日志，数据块则被直接写入到磁盘位置上。这样可以保存文件系统结构，防止崩溃，但却有可能发生数据崩溃。比如：在元数据记录到日志后，数据块写入磁盘前，系统崩溃
+2. **预定（ordered）**：只将元数据记录到日志，但是在此之前将数据写入到磁盘。这样就可以保证系统恢复后数据和文件系统的一致性
+3. **数据（data）**：将数据也记录到了日志中。可以最大限度地防止文件系统崩溃与数据丢失，但由于全部数据都写入了两次（先写入日志，再写入磁盘），系统性能可能会降低
+
+### Abstract
+
+### 1.Introduction
+
+**事务**：一组原子的、不可中断的文件系统修改
+
+事务在作用于original area前首先被日志记录到journal area。当事务被commit后，被提交的事务才被写到original area by checkpointing
+
+journaling can face a performance bottleneck on multi-cores and high-performance [15,16,21]
+
+应用程序中的多个线程使用一个粗粒度锁将它们自身的buffer插入到当前运行事务中。除此之外，还有一个应用线程执行checkpoint I/O操作
+
+[16,21] investigated the locking and I/O operations of file systems
+
+> SpanFS [16] 好像是讲文件系统操作和锁比较基础的文献。[21] 发现了在很多I/O密集型的应用中，文件系统存在隐藏的可扩展性瓶颈。他们设计并实现了一个benchmark来评估文件系统的可扩展性并发现了不符合预期的可扩展性表现
+
+### 2. Background and Motivation
+
+* 高性能SSD广泛用于云平台、社交网络服务、等等
+* SSD的吞吐量并不会随着CPU核数的扩展而增长或减少（事务处理相关的数据结构被被不可扩展的锁保护）
+* 在事务处理中，存在粗粒度锁定的I/O操作
+	* EXT4/JBD2事务处理中的锁：
+		* 整个的写时间：52220s（100%）
+		* `j_checkpoint_mutex`(mutex lock)：17946s（34.40%）(**Hot lock**)
+		* `j_list_lock`（spin lock）：6140s（11.75%）(**Hot lock**)
+		* `j_state_lock`(r/w lock)：102s（0.19%）
+	* I/O流程
+		* 1）running
+		* 2）committing
+		* 3）checkpointing
+* 粗粒度锁限制了多核的可扩展性（insert、fetch、remove等操作使用同一个自旋锁）
+* 单线的I/O操作限制了SSD的I/O并行性
+
+### 3.Design and Implementation
+
+* **目的**：优化日志文件系统中的事务（running、committing、checkpointing）处理
+* **策略**
+	* 更新数据结构
+		- 采用无锁（lock-free）数据结构及使用原子指令的操作
+			- 无锁的insert、remove、fetch
+				- insert：使用atomic set instruction
+			- 使用原子指令：`atomic_add()`/`atomic_read()`/...
+	* 通过一种协作的方式实现I/O并发：使日志和checkpoint I/O操作不会阻塞，并行的从共享链表中获取buffers，发布I/O，以及完成它们
+
+<br>
+
+<h2 id="osdi16-1"></h2>
+
+## A Scalable Architecture for Incremental Parallelization of File System Code
+
+[pdf](https://pdfs.semanticscholar.org/c9ef/82a4ad0b1b33296cea86fb2ec7558cf798fb.pdf)
+
+> 
